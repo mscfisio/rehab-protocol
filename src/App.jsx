@@ -1,8 +1,4 @@
-import { useState, useRef, useEffect } from "react";
-
-// ─── CONFIG ────────────────────────────────────────────────
-// Token salvato in localStorage dopo login
-const TOKEN_KEY = "rp_auth_token";
+import { useState, useRef } from "react";
 
 const SYSTEM_PROMPT = `Sei un assistente specializzato in fisioterapia evidence-based rivolto a fisioterapisti professionisti.
 Rispondi ESCLUSIVAMENTE basandoti su fonti cliniche validate:
@@ -31,210 +27,38 @@ Struttura JSON obbligatoria:
   "fonti_principali": ["string"],
   "disclaimer": "string"
 }
-Lingua: italiano per descrizioni, inglese per terminologia tecnica clinica standard.
+Lingua: italiano per descrizioni, inglese per terminologia tecnica clinica standard (es. Range of Motion, Manual Muscle Testing, ecc.).
 Se le informazioni su una patologia sono insufficienti nelle fonti disponibili, dichiara esplicitamente il limite nel campo riepilogo.`;
 
 const FASI = ["Acuta (0-2 settimane)", "Subacuta (2-6 settimane)", "Rimodellamento (6-12 settimane)", "Funzionale/Return to Activity", "Post-operatoria precoce", "Post-operatoria tardiva", "Cronica"];
 
-// ─── STYLES ────────────────────────────────────────────────
-const GLOBAL_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #0F1829; } ::-webkit-scrollbar-thumb { background: #14B8A6; border-radius: 2px; }
-  input, select, textarea { outline: none; }
-  input:focus, select:focus, textarea:focus { border-color: #14B8A6 !important; box-shadow: 0 0 0 2px rgba(20,184,166,0.15) !important; }
-  .btn-primary { background: linear-gradient(135deg, #14B8A6, #0D9488); border: none; color: white; cursor: pointer; font-family: 'Sora', sans-serif; font-weight: 600; font-size: 0.95rem; padding: 14px 28px; border-radius: 12px; width: 100%; transition: all 0.2s; letter-spacing: 0.02em; }
-  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(20,184,166,0.35); }
-  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-  .btn-ghost { background: transparent; border: 1px solid #1E3A5F; color: #94A3B8; cursor: pointer; font-family: 'Sora', sans-serif; font-size: 0.85rem; padding: 8px 16px; border-radius: 8px; transition: all 0.2s; }
-  .btn-ghost:hover { border-color: #14B8A6; color: #14B8A6; }
-  .field-label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #64748B; margin-bottom: 6px; display: block; }
-  .field-input { width: 100%; background: #0F1829; border: 1px solid #1E2D4A; border-radius: 10px; color: #E2E8F0; font-family: 'Sora', sans-serif; font-size: 0.9rem; padding: 11px 14px; transition: border-color 0.2s, box-shadow 0.2s; }
-  select.field-input option { background: #0F1829; }
-  .card { background: #0D1B2E; border: 1px solid #1A2D4A; border-radius: 16px; padding: 20px; margin-bottom: 16px; }
-  .tag { display: inline-block; background: rgba(20,184,166,0.12); color: #14B8A6; border: 1px solid rgba(20,184,166,0.25); border-radius: 20px; font-size: 0.72rem; font-weight: 600; padding: 3px 10px; letter-spacing: 0.04em; }
-  .badge { display: inline-flex; align-items: center; gap: 4px; background: rgba(148,163,184,0.08); color: #94A3B8; border-radius: 6px; font-size: 0.78rem; padding: 3px 8px; font-family: 'DM Mono', monospace; }
-  .tab-btn { background: transparent; border: none; cursor: pointer; font-family: 'Sora', sans-serif; font-size: 0.8rem; font-weight: 500; padding: 10px 14px; border-radius: 10px; transition: all 0.2s; display: flex; align-items: center; gap: 6px; color: #475569; white-space: nowrap; }
-  .tab-btn.active { background: rgba(20,184,166,0.15); color: #14B8A6; }
-  .tab-btn:hover:not(.active) { color: #94A3B8; background: rgba(255,255,255,0.04); }
-  .pill { display: inline-block; background: rgba(20,184,166,0.08); border-left: 2px solid #14B8A6; padding: 6px 12px; border-radius: 0 6px 6px 0; font-size: 0.83rem; color: #CBD5E1; margin: 4px 0; }
-  .warn-pill { display: inline-block; background: rgba(251,146,60,0.08); border-left: 2px solid #FB923C; padding: 6px 12px; border-radius: 0 6px 6px 0; font-size: 0.83rem; color: #CBD5E1; margin: 4px 0; }
-  .fase-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 14px 16px; border-radius: 10px; transition: background 0.2s; }
-  .fase-header:hover { background: rgba(255,255,255,0.03); }
-  .esercizio-card { background: rgba(255,255,255,0.02); border: 1px solid #1A2D4A; border-radius: 12px; padding: 14px; margin-bottom: 10px; }
-  .spinner { width: 36px; height: 36px; border: 3px solid rgba(20,184,166,0.2); border-top-color: #14B8A6; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .dot-pulse::after { content: ''; animation: dots 1.5s infinite; }
-  @keyframes dots { 0% { content: ''; } 33% { content: '.'; } 66% { content: '..'; } 100% { content: '...'; } }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  @media (max-width: 480px) { .grid-2 { grid-template-columns: 1fr; } }
-  .fonte-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid #1A2D4A; }
-  .fonte-item:last-child { border-bottom: none; }
-  .fonte-dot { width: 6px; height: 6px; background: #14B8A6; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
-  .section-title { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #14B8A6; margin-bottom: 12px; }
-  .test-card { background: rgba(255,255,255,0.02); border: 1px solid #1A2D4A; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-  .test-card-title { font-size: 0.95rem; font-weight: 600; color: #E2E8F0; margin-bottom: 8px; }
-  .info-row { display: flex; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; align-items: baseline; }
-  .info-key { font-size: 0.73rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.06em; min-width: 90px; }
-  .info-val { font-size: 0.83rem; color: #94A3B8; flex: 1; }
-  /* Landing */
-  .landing-hero { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(20,184,166,0.12) 0%, transparent 70%); }
-  .landing-headline { font-size: clamp(2rem, 6vw, 3.5rem); font-weight: 700; color: #F1F5F9; line-height: 1.1; letter-spacing: -0.03em; margin-bottom: 20px; }
-  .landing-sub { font-size: clamp(0.95rem, 2.5vw, 1.15rem); color: #64748B; max-width: 520px; line-height: 1.7; margin-bottom: 40px; }
-  .landing-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; max-width: 700px; width: 100%; margin-bottom: 48px; }
-  .feature-card { background: rgba(255,255,255,0.03); border: 1px solid #1A2D4A; border-radius: 14px; padding: 20px; text-align: left; }
-  .feature-icon { width: 36px; height: 36px; background: rgba(20,184,166,0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
-  .feature-title { font-size: 0.9rem; font-weight: 600; color: #E2E8F0; margin-bottom: 6px; }
-  .feature-desc { font-size: 0.8rem; color: #475569; line-height: 1.5; }
-  .landing-cta { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-  .btn-cta { background: linear-gradient(135deg, #14B8A6, #0D9488); border: none; color: white; cursor: pointer; font-family: 'Sora', sans-serif; font-weight: 600; font-size: 1rem; padding: 16px 36px; border-radius: 14px; transition: all 0.2s; letter-spacing: 0.02em; }
-  .btn-cta:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(20,184,166,0.4); }
-  /* Login */
-  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
-  .login-box { background: #0D1B2E; border: 1px solid #1A2D4A; border-radius: 20px; padding: 36px 32px; width: 100%; max-width: 400px; }
-  .login-title { font-size: 1.4rem; font-weight: 700; color: #F1F5F9; margin-bottom: 6px; }
-  .login-sub { font-size: 0.83rem; color: #475569; margin-bottom: 28px; }
-  .login-error { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); border-radius: 8px; padding: 10px 14px; font-size: 0.82rem; color: #FCA5A5; margin-bottom: 16px; }
-`;
-
-// ─── HEADER ────────────────────────────────────────────────
-function Header({ onLogout, showLogout }) {
-  return (
-    <div style={{ background: "linear-gradient(180deg, #0D1B2E 0%, #070D1A 100%)", borderBottom: "1px solid #1A2D4A", padding: "16px 20px", position: "sticky", top: 0, zIndex: 10 }}>
-      <div style={{ maxWidth: 680, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #14B8A6, #0891B2)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          </div>
-          <div>
-            <div style={{ fontSize: "1rem", fontWeight: 700, color: "#F1F5F9", letterSpacing: "-0.01em" }}>RehabProtocol</div>
-            <div style={{ fontSize: "0.7rem", color: "#475569", letterSpacing: "0.04em" }}>Evidence-Based Physiotherapy</div>
-          </div>
-        </div>
-        {showLogout && (
-          <button className="btn-ghost" onClick={onLogout} style={{ fontSize: "0.78rem" }}>Esci</button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── LANDING PAGE ──────────────────────────────────────────
-function Landing({ onLogin }) {
-  return (
-    <div style={{ fontFamily: "'Sora', sans-serif", background: "#070D1A", minHeight: "100vh", color: "#E2E8F0" }}>
-      <Header showLogout={false} />
-      <div className="landing-hero">
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(20,184,166,0.08)", border: "1px solid rgba(20,184,166,0.2)", borderRadius: 20, padding: "6px 14px", fontSize: "0.75rem", color: "#14B8A6", fontWeight: 600, letterSpacing: "0.06em", marginBottom: 28 }}>
-          ✦ EVIDENCE-BASED · FISIOTERAPIA PROFESSIONALE
-        </div>
-        <h1 className="landing-headline">
-          Protocolli riabilitativi<br />
-          <span style={{ color: "#14B8A6" }}>in 30 secondi</span>
-        </h1>
-        <p className="landing-sub">
-          Inserisci i dati clinici del paziente. RehabProtocol genera un protocollo evidence-based completo — test, fasi, esercizi, fonti — basato su Kisner, APTA, JOSPT e Cochrane.
-        </p>
-        <div className="landing-features">
-          {[
-            { icon: "📋", title: "Batteria test validata", desc: "Test clinici selezionati per diagnosi e fase, con procedura e scoring." },
-            { icon: "📈", title: "Fasi con criteri", desc: "Progressione per fasi con criteri di avanzamento e precauzioni specifiche." },
-            { icon: "💪", title: "Esercizi per fase", desc: "Parametri, progressione e controindicazioni per ogni esercizio." },
-            { icon: "📚", title: "Fonti citate", desc: "Ogni protocollo riporta le fonti bibliografiche utilizzate." },
-          ].map((f, i) => (
-            <div key={i} className="feature-card">
-              <div className="feature-icon"><span style={{ fontSize: "1.1rem" }}>{f.icon}</span></div>
-              <div className="feature-title">{f.title}</div>
-              <div className="feature-desc">{f.desc}</div>
-            </div>
-          ))}
-        </div>
-        <div className="landing-cta">
-          <button className="btn-cta" onClick={onLogin}>Accedi alla piattaforma →</button>
-        </div>
-        <div style={{ marginTop: 48, fontSize: "0.75rem", color: "#334155", maxWidth: 480, lineHeight: 1.6 }}>
-          Strumento di supporto clinico professionale. I protocolli generati non sostituiscono il ragionamento clinico del fisioterapista.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── LOGIN PAGE ────────────────────────────────────────────
-function Login({ onSuccess, onBack }) {
-  const [token, setToken] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async () => {
-    if (!token.trim()) { setError("Inserisci il token di accesso."); return; }
-    setLoading(true); setError("");
-    try {
-      // Verifica token facendo una chiamata test al proxy
-      const res = await fetch("/api/claude", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token.trim()}` },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5-20250929",
-          max_tokens: 10,
-          messages: [{ role: "user", content: "ping" }],
-        }),
-      });
-      if (res.status === 401) { setError("Token non valido."); return; }
-      // Token valido — salva e procedi
-      localStorage.setItem(TOKEN_KEY, token.trim());
-      onSuccess(token.trim());
-    } catch {
-      setError("Errore di connessione. Riprova.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div style={{ fontFamily: "'Sora', sans-serif", background: "#070D1A", minHeight: "100vh", color: "#E2E8F0" }}>
-      <Header showLogout={false} />
-      <div className="login-wrap">
-        <div className="login-box">
-          <div className="login-title">Accedi</div>
-          <div className="login-sub">Inserisci il tuo token di accesso per continuare.</div>
-          {error && <div className="login-error">{error}</div>}
-          <div style={{ marginBottom: 16 }}>
-            <label className="field-label">Token di accesso</label>
-            <input
-              className="field-input"
-              type="password"
-              placeholder="rp_••••••••••••"
-              value={token}
-              onChange={e => setToken(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleLogin()}
-            />
-          </div>
-          <button className="btn-primary" onClick={handleLogin} disabled={loading}>
-            {loading ? "Verifica in corso..." : "Accedi"}
-          </button>
-          <button className="btn-ghost" onClick={onBack} style={{ width: "100%", marginTop: 10 }}>
-            ← Torna alla home
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── TAB ICON ──────────────────────────────────────────────
 const TabIcon = ({ tab }) => {
   const icons = {
-    test: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>,
-    fasi: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>,
-    esercizi: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8zM6 1v3M10 1v3M14 1v3"/></svg>,
-    fonti: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20M4 19.5v-15A2.5 2.5 0 016.5 2H20v20H6.5A2.5 2.5 0 014 19.5z"/></svg>,
+    test: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+      </svg>
+    ),
+    fasi: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+      </svg>
+    ),
+    esercizi: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8zM6 1v3M10 1v3M14 1v3"/>
+      </svg>
+    ),
+    fonti: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 19.5A2.5 2.5 0 016.5 17H20M4 19.5v-15A2.5 2.5 0 016.5 2H20v20H6.5A2.5 2.5 0 014 19.5z"/>
+      </svg>
+    ),
   };
   return icons[tab] || null;
 };
 
-// ─── APP PRINCIPALE ────────────────────────────────────────
-function AppMain({ token, onLogout }) {
+export default function FisioterapiaApp() {
   const [form, setForm] = useState({ eta: "", sesso: "", diagnosi: "", intervento: "", comorbidita: "", fase: "", settimane: "" });
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfBase64, setPdfBase64] = useState(null);
@@ -279,10 +103,7 @@ Genera il protocollo riabilitativo completo in JSON.`;
 
       const res = await fetch("/api/claude", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-5-20250929",
           max_tokens: 16000,
@@ -290,12 +111,6 @@ Genera il protocollo riabilitativo completo in JSON.`;
           messages: [{ role: "user", content }],
         }),
       });
-
-      if (res.status === 401) {
-        onLogout();
-        return;
-      }
-
       const data = await res.json();
       if (data.error) throw new Error(data.error.message);
       const text = data.content.map(i => i.text || "").join("").replace(/```json|```/g, "").trim();
@@ -323,9 +138,69 @@ Genera il protocollo riabilitativo completo in JSON.`;
 
   return (
     <div style={{ fontFamily: "'Sora', sans-serif", background: "#070D1A", minHeight: "100vh", color: "#E2E8F0" }}>
-      <Header showLogout onLogout={onLogout} />
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #0F1829; } ::-webkit-scrollbar-thumb { background: #14B8A6; border-radius: 2px; }
+        input, select, textarea { outline: none; } 
+        input:focus, select:focus, textarea:focus { border-color: #14B8A6 !important; box-shadow: 0 0 0 2px rgba(20,184,166,0.15) !important; }
+        .btn-primary { background: linear-gradient(135deg, #14B8A6, #0D9488); border: none; color: white; cursor: pointer; font-family: 'Sora', sans-serif; font-weight: 600; font-size: 0.95rem; padding: 14px 28px; border-radius: 12px; width: 100%; transition: all 0.2s; letter-spacing: 0.02em; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(20,184,166,0.35); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-ghost { background: transparent; border: 1px solid #1E3A5F; color: #94A3B8; cursor: pointer; font-family: 'Sora', sans-serif; font-size: 0.85rem; padding: 8px 16px; border-radius: 8px; transition: all 0.2s; }
+        .btn-ghost:hover { border-color: #14B8A6; color: #14B8A6; }
+        .field-label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #64748B; margin-bottom: 6px; display: block; }
+        .field-input { width: 100%; background: #0F1829; border: 1px solid #1E2D4A; border-radius: 10px; color: #E2E8F0; font-family: 'Sora', sans-serif; font-size: 0.9rem; padding: 11px 14px; transition: border-color 0.2s, box-shadow 0.2s; }
+        select.field-input option { background: #0F1829; }
+        .card { background: #0D1B2E; border: 1px solid #1A2D4A; border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+        .tag { display: inline-block; background: rgba(20,184,166,0.12); color: #14B8A6; border: 1px solid rgba(20,184,166,0.25); border-radius: 20px; font-size: 0.72rem; font-weight: 600; padding: 3px 10px; letter-spacing: 0.04em; }
+        .badge { display: inline-flex; align-items: center; gap: 4px; background: rgba(148,163,184,0.08); color: #94A3B8; border-radius: 6px; font-size: 0.78rem; padding: 3px 8px; font-family: 'DM Mono', monospace; }
+        .tab-btn { background: transparent; border: none; cursor: pointer; font-family: 'Sora', sans-serif; font-size: 0.8rem; font-weight: 500; padding: 10px 14px; border-radius: 10px; transition: all 0.2s; display: flex; align-items: center; gap: 6px; color: #475569; white-space: nowrap; }
+        .tab-btn.active { background: rgba(20,184,166,0.15); color: #14B8A6; }
+        .tab-btn:hover:not(.active) { color: #94A3B8; background: rgba(255,255,255,0.04); }
+        .pill { display: inline-block; background: rgba(20,184,166,0.08); border-left: 2px solid #14B8A6; padding: 6px 12px; border-radius: 0 6px 6px 0; font-size: 0.83rem; color: #CBD5E1; margin: 4px 0; }
+        .warn-pill { display: inline-block; background: rgba(251,146,60,0.08); border-left: 2px solid #FB923C; padding: 6px 12px; border-radius: 0 6px 6px 0; font-size: 0.83rem; color: #CBD5E1; margin: 4px 0; }
+        .fase-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 14px 16px; border-radius: 10px; transition: background 0.2s; }
+        .fase-header:hover { background: rgba(255,255,255,0.03); }
+        .esercizio-card { background: rgba(255,255,255,0.02); border: 1px solid #1A2D4A; border-radius: 12px; padding: 14px; margin-bottom: 10px; }
+        .spinner { width: 36px; height: 36px; border: 3px solid rgba(20,184,166,0.2); border-top-color: #14B8A6; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .dot-pulse::after { content: ''; animation: dots 1.5s infinite; }
+        @keyframes dots { 0% { content: ''; } 33% { content: '.'; } 66% { content: '..'; } 100% { content: '...'; } }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 480px) { .grid-2 { grid-template-columns: 1fr; } }
+        .fonte-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid #1A2D4A; }
+        .fonte-item:last-child { border-bottom: none; }
+        .fonte-dot { width: 6px; height: 6px; background: #14B8A6; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+        .section-title { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #14B8A6; margin-bottom: 12px; }
+        .test-card { background: rgba(255,255,255,0.02); border: 1px solid #1A2D4A; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+        .test-card-title { font-size: 0.95rem; font-weight: 600; color: #E2E8F0; margin-bottom: 8px; }
+        .info-row { display: flex; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; align-items: baseline; }
+        .info-key { font-size: 0.73rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.06em; min-width: 90px; }
+        .info-val { font-size: 0.83rem; color: #94A3B8; flex: 1; }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ background: "linear-gradient(180deg, #0D1B2E 0%, #070D1A 100%)", borderBottom: "1px solid #1A2D4A", padding: "16px 20px", position: "sticky", top: 0, zIndex: 10 }}>
+        <div style={{ maxWidth: 680, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #14B8A6, #0891B2)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: "1rem", fontWeight: 700, color: "#F1F5F9", letterSpacing: "-0.01em" }}>RehabProtocol</div>
+              <div style={{ fontSize: "0.7rem", color: "#475569", letterSpacing: "0.04em" }}>Evidence-Based Physiotherapy</div>
+            </div>
+          </div>
+          {result && <button className="btn-ghost" onClick={reset}>Nuovo paziente</button>}
+        </div>
+      </div>
+
       <div style={{ maxWidth: 680, margin: "0 auto", padding: "20px 16px 40px" }}>
 
+        {/* Form */}
         {!result && !loading && (
           <div>
             <div style={{ marginBottom: 24 }}>
@@ -333,6 +208,7 @@ Genera il protocollo riabilitativo completo in JSON.`;
               <div style={{ fontSize: "0.83rem", color: "#475569" }}>Compila i dati per generare il protocollo riabilitativo</div>
             </div>
 
+            {/* Dati anagrafici */}
             <div className="card" style={{ marginBottom: 14 }}>
               <div className="section-title">Dati anagrafici</div>
               <div className="grid-2">
@@ -351,22 +227,24 @@ Genera il protocollo riabilitativo completo in JSON.`;
               </div>
             </div>
 
+            {/* Dati clinici */}
             <div className="card" style={{ marginBottom: 14 }}>
               <div className="section-title">Dati clinici</div>
               <div style={{ marginBottom: 12 }}>
                 <label className="field-label">Diagnosi *</label>
-                <textarea className="field-input" name="diagnosi" rows={2} placeholder="es. Rottura del LCA, Coxartrosi grado III..." value={form.diagnosi} onChange={handleChange} style={{ resize: "vertical", minHeight: 60 }} />
+                <textarea className="field-input" name="diagnosi" rows={2} placeholder="es. Rottura del LCA, Coxartrosi grado III, Sindrome della cuffia dei rotatori..." value={form.diagnosi} onChange={handleChange} style={{ resize: "vertical", minHeight: 60 }} />
               </div>
               <div style={{ marginBottom: 12 }}>
                 <label className="field-label">Intervento chirurgico</label>
-                <input className="field-input" name="intervento" placeholder="es. Ricostruzione LCA — lascia vuoto se conservativo" value={form.intervento} onChange={handleChange} />
+                <input className="field-input" name="intervento" placeholder="es. Ricostruzione LCA con tendine rotuleo, Protesi totale d'anca — lascia vuoto se conservativo" value={form.intervento} onChange={handleChange} />
               </div>
               <div>
                 <label className="field-label">Comorbidità</label>
-                <input className="field-input" name="comorbidita" placeholder="es. Diabete tipo 2, Ipertensione..." value={form.comorbidita} onChange={handleChange} />
+                <input className="field-input" name="comorbidita" placeholder="es. Diabete tipo 2, Ipertensione, Osteoporosi, BMI > 30..." value={form.comorbidita} onChange={handleChange} />
               </div>
             </div>
 
+            {/* Fase clinica */}
             <div className="card" style={{ marginBottom: 14 }}>
               <div className="section-title">Fase clinica</div>
               <div className="grid-2">
@@ -384,6 +262,7 @@ Genera il protocollo riabilitativo completo in JSON.`;
               </div>
             </div>
 
+            {/* PDF upload */}
             <div className="card" style={{ marginBottom: 20 }}>
               <div className="section-title">Protocollo aggiuntivo (opzionale)</div>
               <div
@@ -420,11 +299,12 @@ Genera il protocollo riabilitativo completo in JSON.`;
             </button>
 
             <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(251,146,60,0.06)", border: "1px solid rgba(251,146,60,0.15)", borderRadius: 8, fontSize: "0.75rem", color: "#94A3B8", lineHeight: 1.5 }}>
-              <strong style={{ color: "#FB923C" }}>⚠ Uso professionale</strong> — I protocolli generati sono strumenti di supporto clinico basati su letteratura evidence-based. Non sostituiscono il ragionamento clinico del fisioterapista.
+              <strong style={{ color: "#FB923C" }}>⚠ Uso professionale</strong> — I protocolli generati sono strumenti di supporto clinico basati su letteratura evidence-based. Non sostituiscono il ragionamento clinico del fisioterapista. La responsabilità delle decisioni terapeutiche rimane del professionista sanitario.
             </div>
           </div>
         )}
 
+        {/* Loading */}
         {loading && (
           <div style={{ textAlign: "center", padding: "60px 20px" }}>
             <div className="spinner" style={{ marginBottom: 20 }} />
@@ -433,12 +313,16 @@ Genera il protocollo riabilitativo completo in JSON.`;
           </div>
         )}
 
+        {/* Results */}
         {result && !loading && (
           <div>
+            {/* Patient summary */}
             <div style={{ marginBottom: 20, padding: "14px 16px", background: "linear-gradient(135deg, rgba(20,184,166,0.08), rgba(8,145,178,0.06))", border: "1px solid rgba(20,184,166,0.2)", borderRadius: 14 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: "1rem", fontWeight: 700, color: "#F1F5F9", marginBottom: 4 }}>{result.valutazione?.titolo}</div>
-                <div style={{ fontSize: "0.82rem", color: "#94A3B8", lineHeight: 1.6 }}>{result.valutazione?.riepilogo}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: "1rem", fontWeight: 700, color: "#F1F5F9", marginBottom: 4 }}>{result.valutazione?.titolo}</div>
+                  <div style={{ fontSize: "0.82rem", color: "#94A3B8", lineHeight: 1.6 }}>{result.valutazione?.riepilogo}</div>
+                </div>
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                 <span className="badge">{form.eta}a · {form.sesso}</span>
@@ -447,6 +331,7 @@ Genera il protocollo riabilitativo completo in JSON.`;
               </div>
             </div>
 
+            {/* Tabs */}
             <div style={{ display: "flex", gap: 4, marginBottom: 16, overflowX: "auto", paddingBottom: 2 }}>
               {tabs.map(t => (
                 <button key={t.id} className={`tab-btn ${activeTab === t.id ? "active" : ""}`} onClick={() => setActiveTab(t.id)}>
@@ -458,6 +343,7 @@ Genera il protocollo riabilitativo completo in JSON.`;
               ))}
             </div>
 
+            {/* Tab: Test */}
             {activeTab === "test" && (
               <div>
                 <div className="section-title" style={{ marginBottom: 16 }}>Batteria di Test Raccomandati</div>
@@ -470,12 +356,15 @@ Genera il protocollo riabilitativo completo in JSON.`;
                     <div className="info-row"><span className="info-key">Obiettivo</span><span className="info-val">{test.obiettivo}</span></div>
                     <div className="info-row"><span className="info-key">Procedura</span><span className="info-val">{test.procedura}</span></div>
                     <div className="info-row"><span className="info-key">Scoring</span><span className="info-val">{test.scoring}</span></div>
-                    <div style={{ marginTop: 8 }}><span className="tag" style={{ fontSize: "0.7rem" }}>📖 {test.fonte}</span></div>
+                    <div style={{ marginTop: 8 }}>
+                      <span className="tag" style={{ fontSize: "0.7rem" }}>📖 {test.fonte}</span>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
 
+            {/* Tab: Fasi */}
             {activeTab === "fasi" && (
               <div>
                 <div className="section-title" style={{ marginBottom: 16 }}>Fasi di Riabilitazione</div>
@@ -520,6 +409,7 @@ Genera il protocollo riabilitativo completo in JSON.`;
               </div>
             )}
 
+            {/* Tab: Esercizi */}
             {activeTab === "esercizi" && (
               <div>
                 <div className="section-title" style={{ marginBottom: 16 }}>Esercizi e Tecniche per Fase</div>
@@ -553,6 +443,7 @@ Genera il protocollo riabilitativo completo in JSON.`;
               </div>
             )}
 
+            {/* Tab: Fonti */}
             {activeTab === "fonti" && (
               <div>
                 <div className="section-title" style={{ marginBottom: 16 }}>Fonti Bibliografiche</div>
@@ -573,32 +464,13 @@ Genera il protocollo riabilitativo completo in JSON.`;
             )}
 
             <div style={{ marginTop: 20 }}>
-              <button className="btn-ghost" onClick={reset} style={{ width: "100%" }}>← Nuovo protocollo</button>
+              <button className="btn-ghost" onClick={reset} style={{ width: "100%" }}>
+                ← Nuovo protocollo
+              </button>
             </div>
           </div>
         )}
       </div>
     </div>
   );
-}
-
-// ─── ROOT — ROUTER ─────────────────────────────────────────
-export default function App() {
-  const [page, setPage] = useState("landing"); // landing | login | app
-  const [token, setToken] = useState(null);
-
-  useEffect(() => {
-    const saved = localStorage.getItem(TOKEN_KEY);
-    if (saved) { setToken(saved); setPage("app"); }
-  }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    setToken(null);
-    setPage("landing");
-  };
-
-  if (page === "app" && token) return <><style>{GLOBAL_CSS}</style><AppMain token={token} onLogout={handleLogout} /></>;
-  if (page === "login") return <><style>{GLOBAL_CSS}</style><Login onSuccess={(t) => { setToken(t); setPage("app"); }} onBack={() => setPage("landing")} /></>;
-  return <><style>{GLOBAL_CSS}</style><Landing onLogin={() => setPage("login")} /></>;
 }
